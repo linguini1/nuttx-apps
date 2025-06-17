@@ -28,16 +28,13 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <sched.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
-
-#ifdef CONFIG_LIBC_EXECFUNCS
-#include <spawn.h>
-#endif
 
 #include <getopt.h>
 #include <syslog.h>
@@ -52,7 +49,7 @@
 
 /* syslogd program version */
 
-#define SYSLOGD_VERSION "0.0.0"
+#define SYSLOGD_VERSION "0.0.1"
 
 /* Minimum buffer size check */
 
@@ -96,11 +93,9 @@ int main(int argc, FAR char **argv)
   char buffer[CONFIG_SYSTEM_SYSLOGD_ENTRYSIZE];
   bool debugmode = false;
   bool skiplog = false;
-#ifdef CONFIG_LIBC_EXECFUNCS
   pid_t pid;
   bool background = true;
   char *new_argv[MAX_ARGS + 1];
-#endif
 
   /* Parse command line options */
 
@@ -121,18 +116,14 @@ int main(int argc, FAR char **argv)
 
           debugmode = true;
           printf("Enabling debug mode.\n");
-#ifdef CONFIG_LIBC_EXECFUNCS
           background = false;
-#endif
           break;
 
         case 'n':
 
           /* Stay in foreground */
 
-#ifdef CONFIG_LIBC_EXECFUNCS
           background = false;
-#endif
           break;
 
         case '?':
@@ -142,11 +133,10 @@ int main(int argc, FAR char **argv)
         }
     }
 
-    /* Run this program in the background as a spawned task if the background
-     * option was selected.
-     */
+  /* Run this program in the background as a spawned task if the background
+   * option was selected.
+   */
 
-#ifdef CONFIG_LIBC_EXECFUNCS
   if (background)
     {
       /* Set up the arguments, which is identical to the original except with
@@ -167,10 +157,11 @@ int main(int argc, FAR char **argv)
 
       /* Spawn the child for backgrounding now */
 
-      if (posix_spawn(&pid, argv[0], NULL, NULL, new_argv, NULL) != 0)
+      if (task_create(argv[0], CONFIG_SYSTEM_SYSLOGD_PRIORITY,
+                      CONFIG_SYSTEM_SYSLOGD_STACKSIZE, syslogd_main,
+                      argv) < 0)
         {
-          fprintf(stderr, "Failed to fork() to background process: %d\n",
-                  errno);
+          fprintf(stderr, "Failed to create background task: %d\n", errno);
           return EXIT_FAILURE;
         }
       else
@@ -180,7 +171,6 @@ int main(int argc, FAR char **argv)
           return EXIT_SUCCESS;
         }
     }
-#endif /* CONFIG_LIBC_EXECFUNCS */
 
   /* Set up client connection information */
 
@@ -232,7 +222,7 @@ int main(int argc, FAR char **argv)
       printf("Beginning to continuously transmit syslog entries.\n");
     }
 
-  for (; ; )
+  for (;;)
     {
       /* Read as much data as possible into the remaining space in our buffer
        */
